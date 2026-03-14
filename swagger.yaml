@@ -1,0 +1,251 @@
+openapi: 3.0.0
+info:
+  title: Gated Community Management API
+  description: Phase 2 implementation featuring JWT Authentication, RBAC, and Transaction Management
+  version: "1.0.0"
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local development server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      summary: User and Resident Registration
+      description: Registers a new user and maps them to a resident profile using a database transaction.
+      security: [] # No auth required for registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+                - email
+                - unit_id
+                - residency_status
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+                unit_id:
+                  type: integer
+                residency_status:
+                  type: string
+                  enum: [Owner, Tenant]
+                move_in_date:
+                  type: string
+                  format: date
+      responses:
+        '201':
+          description: Created successfully
+        '400':
+          description: Missing required fields
+        '500':
+          description: Transaction rolled back / Server error
+
+  /auth/login:
+    post:
+      summary: User Login
+      description: Authenticates a user and returns a JWT token.
+      security: [] # No auth required for login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful (Returns JWT)
+        '401':
+          description: Invalid username or password
+
+  /amenities:
+    get:
+      summary: Get All Amenities
+      description: Returns a list of all community amenities.
+      responses:
+        '200':
+          description: list of amenities retrieved successfully
+
+  /amenities/book:
+    post:
+      summary: Book an Amenity
+      description: Creates a booking and corresponding pending payment using a transaction. Only Residents can access this.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amenity_id
+                - booking_date
+                - start_time
+                - end_time
+              properties:
+                amenity_id:
+                  type: integer
+                booking_date:
+                  type: string
+                  format: date
+                start_time:
+                  type: string
+                  format: time
+                end_time:
+                  type: string
+                  format: time
+      responses:
+        '201':
+          description: Amenity booked successfully
+        '400':
+          description: User not resident / Missing fields
+        '403':
+          description: Forbidden (Not a resident role)
+        '404':
+          description: Amenity not found
+        '500':
+          description: Booking failed, transaction rolled back
+
+  /admin/overview:
+    get:
+      summary: Get Administrative Overview
+      description: Retrieves system overview including active bookings and resident dues (combines views). Only Admin/Manager roles can access this.
+      responses:
+        '200':
+          description: Overview retrieved successfully
+        '403':
+          description: Forbidden (Not an admin/manager role)
+
+  /admin/users:
+    get:
+      summary: Get All Users
+      description: Retrieves all users in the system. Strictly Admin only.
+      responses:
+        '200':
+          description: Users retrieved successfully
+        '403':
+          description: Forbidden
+
+  /admin/users/{userId}:
+    delete:
+      summary: Delete User
+      description: Deletes a user from the system. (Admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User deleted successfully
+
+  /admin/payments:
+    get:
+      summary: Get All Payments
+      description: Returns a complete list of all payments (Rent, Amenities, Fines) and their statuses, cross-referenced with residents and units. (Admin/Manager only)
+      responses:
+        '200':
+          description: Payments retrieved successfully
+        '403':
+          description: Forbidden
+
+  /resident/unit:
+    get:
+      summary: View Own Unit
+      description: Returns information about the resident's currently mapped property.
+      responses:
+        '200':
+          description: Unit retrieved successfully
+
+  /resident/fees:
+    get:
+      summary: View Resident Fees
+      description: Retrieves all pending and paid fees for the logged-in resident.
+      responses:
+        '200':
+          description: Fees retrieved successfully
+
+  /resident/pay:
+    post:
+      summary: Pay Fee
+      description: Emulates a payment processing system successfully marking a fee as Paid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - payment_id
+              properties:
+                payment_id:
+                  type: integer
+      responses:
+        '200':
+          description: Fee paid successfully
+
+  /security/visitors:
+    get:
+      summary: Get Daily Visitors
+      description: Returns a list of all visitors currently mapped interacting with the system today.
+      responses:
+        '200':
+          description: Visitors retrieved successfully
+          
+  /security/visitors/log:
+    post:
+      summary: Log Visitor Entry
+      description: Logs a visitor into the system (creates a visitor entity if they don't exist and links an access log). Uses Transactions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - id_type
+                - id_number
+                - unit_id
+              properties:
+                name:
+                  type: string
+                id_type:
+                  type: string
+                  enum: [Passport, 'National ID', 'Driver License']
+                id_number:
+                  type: string
+                contact_number:
+                  type: string
+                unit_id:
+                  type: integer
+      responses:
+        '201':
+          description: Logged successfully
