@@ -1,0 +1,30 @@
+=== GATED COMMUNITY DB TRANSACTION ROLLBACK DEMONSTRATION ===
+
+--- TRANSACTION 1: User & Resident Registration ---
+Attempting SUCCESSFUL Registration...
+Response Status: 201
+Response Body: {"message":"User and Resident profiles created successfully","user_id":41}
+
+
+Attempting FAILING Registration (Triggers Rollback)...
+Response Status: 500
+Response Body: {"error":"1452 (23000): Cannot add or update a child row: a foreign key constraint fails (`gated_community_db`.`residents`, CONSTRAINT `residents_ibfk_2` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`) ON DELETE CASCADE)","message":"Registration failed, transaction rolled back."}
+
+^^ Notice the transaction rolled back because of the Foreign Key constraint failure on unit_id. The user 'test_user_fail' was NOT saved to the database.
+
+--- TRANSACTION 2: Amenity Booking ---
+Logging in as 'john_doe' (Resident) to get JWT...
+Login Successful! Retrieved JWT.
+
+Attempting SUCCESSFUL Booking...
+Response Status: 201
+Response Body: {"booking_id":11,"message":"Amenity booked successfully."}
+
+
+Attempting FAILING Booking (Triggers Rollback)...
+Response Status: 404
+Response Body: {"message":"Amenity not found."}
+
+^^ Notice the transaction rolled back completely. No partial records were saved.
+
+Tests completed successfully. Logs written.
