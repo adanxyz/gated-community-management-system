@@ -1,177 +1,135 @@
-from flask import Blueprint, jsonify
-from backend.db import get_db_connection
-from backend.middleware.auth_middleware import token_required, role_required
+import streamlit as st
+import pandas as pd
+import time
+from api import api_get, api_post, api_delete
 
-admin_bp = Blueprint('admin', __name__)
-
-@admin_bp.route('/overview', methods=['GET'])
-@token_required
-@role_required([1, 5]) 
-def get_system_overview():
-    """
-    Returns an overview of the system specifically for administrative roles.
-    Demonstrates Role-Based Access Control and view utilization.
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+def show():
+    st.title("Admin / Manager Dashboard")
     
-    try:
+    tabs = st.tabs(["Overview Analytics", "Manage Users", "Manage Units", "All Complaints", "All Payments"])
+    
+    with tabs[0]:
+        st.header("System Overview")
        
-        cursor.execute("SELECT * FROM view_active_bookings LIMIT 10")
-        active_bookings = cursor.fetchall()
         
-        # Get pending dues
-        cursor.execute("SELECT * FROM view_resident_dues WHERE total_pending > 0 LIMIT 10")
-        resident_dues = cursor.fetchall()
+        with st.spinner("Loading overview..."):
+            res = api_get("/admin/overview")
+            if res.status_code == 200:
+                data = res.json()
+                active_bookings = data.get("active_bookings", [])
+                resident_dues = data.get("resident_dues", [])
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Pending Resident Dues")
+                    if resident_dues:
+                        df_dues = pd.DataFrame(resident_dues)
+                        st.bar_chart(data=df_dues, x="username", y="total_pending", use_container_width=True)
+                        st.dataframe(df_dues, use_container_width=True)
+                    else:
+                        st.info("No residents have pending dues.")
+                
+                with col2:
+                    st.subheader("Active Bookings")
+                    if active_bookings:
+                        df_bookings = pd.DataFrame(active_bookings)
+                        st.dataframe(df_bookings, use_container_width=True)
+                    else:
+                        st.info("No active bookings.")
+            else:
+                st.error(f"Failed to load overview data: {res.text}")
 
-        return jsonify({
-            "message": "System Overview retrieved successfully",
-            "active_bookings": active_bookings,
-            "resident_dues": resident_dues
-        }), 200
+    with tabs[1]:
+        st.header("Manage Users")
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            res = api_get("/admin/users")
+            if res.status_code == 200:
+                users = res.json()
+                if users:
+                    df_users = pd.DataFrame(users)
+                    st.dataframe(df_users, use_container_width=True)
+                else:
+                    st.write("No users found.")
+            else:
+                st.error("Failed to load users.")
+                
+        with col2:
+            st.subheader("Delete User")
+            user_id_to_delete = st.number_input("User ID to Delete", min_value=1, step=1)
+            if st.button("Delete User", type="primary"):
+                with st.spinner("Deleting..."):
+                    del_res = api_delete(f"/admin/users/{user_id_to_delete}")
+                    if del_res.status_code == 200:
+                        st.success("User deleted successfully.")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to delete: {del_res.text}")
 
-    except Exception as e:
-        return jsonify({"message": "Failed to fetch overview", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
+    with tabs[2]:
+        st.header("Manage Units")
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            res = api_get("/admin/units")
+            if res.status_code == 200:
+                units = res.json()
+                if units:
+                    st.dataframe(pd.DataFrame(units), use_container_width=True)
+                else:
+                    st.write("No units found.")
+                    
+        with col2:
+            st.subheader("Create New Unit")
+            with st.form("create_unit_form", clear_on_submit=True):
+                unit_num = st.text_input("Unit Number (e.g., 101)")
+                block = st.text_input("Block (e.g., A)")
+                unit_type = st.selectbox("Type", ["1BHK", "2BHK", "3BHK", "Villa"])
+                sq_ft = st.number_input("Square Feet", min_value=100, step=50, value=1000)
+                submitted = st.form_submit_button("Create Unit")
+                
+                if submitted:
+                    payload = {"unit_number": unit_num, "block": block, "unit_type": unit_type, "square_feet": sq_ft}
+                    create_res = api_post("/admin/units", payload)
+                    if create_res.status_code == 201:
+                        st.success("Unit created successfully.")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error(f"Creation failed: {create_res.text}")
 
-@admin_bp.route('/users', methods=['GET'])
-@token_required
-@role_required([1]) 
-def get_all_users():
-    """Returns all users in the system."""
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT id, username, email, phone, role_id FROM users")
-        users = cursor.fetchall()
-        return jsonify(users), 200
-    except Exception as e:
-        return jsonify({"message": "Failed to fetch users", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-@admin_bp.route('/users/<int:user_id>', methods=['DELETE'])
-@token_required
-@role_required([1])
-def delete_user(user_id):
-    """Deletes a user from the system."""
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        conn.commit()
-        if cursor.rowcount == 0:
-            return jsonify({"message": "User not found"}), 404
-        return jsonify({"message": "User deleted successfully"}), 200
-    except Exception as e:
-        conn.rollback()
-        return jsonify({"message": "Failed to delete user", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-@admin_bp.route('/units', methods=['GET', 'POST'])
-@token_required
-@role_required([1, 5]) 
-def manage_units():
-    """Returns all units or creates a new one."""
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        if request.method == 'GET':
-            cursor.execute("SELECT * FROM units")
-            units = cursor.fetchall()
-            return jsonify(units), 200
-            
-        elif request.method == 'POST':
-            data = request.get_json()
-            required = ['unit_number', 'block', 'unit_type', 'square_feet']
-            if not all(k in data for k in required):
-                return jsonify({"message": "Missing fields"}), 400
-            
-            cursor.execute(
-                "INSERT INTO units (unit_number, block, unit_type, square_feet) VALUES (%s, %s, %s, %s)",
-                (data['unit_number'], data['block'], data['unit_type'], data['square_feet'])
-            )
-            conn.commit()
-            return jsonify({"message": "Unit created successfully", "unit_id": cursor.lastrowid}), 201
-    except Exception as e:
-        if request.method == 'POST': conn.rollback()
-        return jsonify({"message": "Failed to process units", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-@admin_bp.route('/staff', methods=['GET'])
-@token_required
-@role_required([1, 5])
-def get_staff_allocations():
-    """Returns staff assignments."""
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        query = """
-            SELECT s.id, u.username, u.email, u.phone, s.department, s.employee_id 
-            FROM staff s
-            JOIN users u ON s.user_id = u.id
-        """
-        cursor.execute(query)
-        staff = cursor.fetchall()
-        return jsonify(staff), 200
-    except Exception as e:
-        return jsonify({"message": "Failed to fetch staff", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-@admin_bp.route('/complaints', methods=['GET'])
-@token_required
-@role_required([1, 4, 5]) 
-def get_all_complaints():
-    """Returns all complaints lodged by residents."""
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        query = """
-            SELECT c.id, c.title, c.description, c.priority, c.status, c.created_at, u.unit_number 
-            FROM complaints c
-            JOIN residents r ON c.resident_id = r.id
-            JOIN units u ON r.unit_id = u.id
-            ORDER BY c.created_at DESC
-        """
-        cursor.execute(query)
-        complaints = cursor.fetchall()
-        return jsonify(complaints), 200
-    except Exception as e:
-        return jsonify({"message": "Failed to fetch complaints", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-@admin_bp.route('/payments', methods=['GET'])
-@token_required
-@role_required([1, 5]) 
-def get_all_payments():
-    """Returns all payments and rent statuses cross-referenced with resident units."""
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        query = """
-            SELECT p.id, u.username, un.unit_number, p.amount, p.payment_date, p.payment_type, p.status 
-            FROM payments p
-            JOIN residents r ON p.resident_id = r.id
-            JOIN users u ON r.user_id = u.id
-            JOIN units un ON r.unit_id = un.id
-            ORDER BY p.payment_date DESC, p.status
-        """
-        cursor.execute(query)
-        payments = cursor.fetchall()
-        return jsonify(payments), 200
-    except Exception as e:
-        return jsonify({"message": "Failed to fetch payments", "error": str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
+    with tabs[3]:
+        st.header("Complaints")
+        res = api_get("/admin/complaints")
+        if res.status_code == 200:
+            complaints = res.json()
+            if complaints:
+                df_complaints = pd.DataFrame(complaints)
+                
+                
+                status_filter = st.multiselect("Filter by Status", options=df_complaints['status'].unique(), default=df_complaints['status'].unique())
+                priority_filter = st.multiselect("Filter by Priority", options=df_complaints['priority'].unique(), default=df_complaints['priority'].unique())
+                
+                filtered_df = df_complaints[(df_complaints['status'].isin(status_filter)) & (df_complaints['priority'].isin(priority_filter))]
+                
+                st.dataframe(filtered_df, use_container_width=True)
+            else:
+                st.write("No complaints filed.")
+                
+    with tabs[4]:
+        st.header("All Payments Tracker")
+        res = api_get("/admin/payments")
+        if res.status_code == 200:
+            payments = res.json()
+            if payments:
+                df_payments = pd.DataFrame(payments)
+                search_user = st.text_input("Search by Username")
+                if search_user:
+                    df_payments = df_payments[df_payments['username'].str.contains(search_user, case=False, na=False)]
+                
+                st.dataframe(df_payments, use_container_width=True)
+            else:
+                st.write("No payments recorded.")
