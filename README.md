@@ -1,4 +1,4 @@
-# Gated Community Management System (Phase 3)
+# Gated Community Management System 
 
 ## 1. Project Overview
 A comprehensive Gated Community Management System dealing with managing units, residents, staff, security, and amenities. It solves the decentralized community management problem by offering unified, role-based access for CRUD operations, finance tracking, and real-time security handling.
